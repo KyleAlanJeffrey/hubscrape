@@ -1,16 +1,23 @@
 import argparse
 import os
+from pathlib import Path
 import re
+from typing import List
 
 import requests
-from rich.console import Console
+from rich.console import Console, themes
 from rich.progress import track
 
 COMMIT_SEARCH_URL = "https://api.github.com/search/commits?q=owner%3A{}+{}"
 DIFF_URL = "https://github.com/{}/commit/{}.diff"
 REGEX = r"^(?=.*(?:{})).*"
 
-console = Console()
+curr_dir = Path(__file__).parent.resolve()
+console = Console(
+    theme=themes.Theme(
+        {"info": "blue", "success": "green", "warning": "yellow", "error": "red"}
+    )
+)
 
 
 def verbose_print(message: str):
@@ -26,11 +33,14 @@ def parse_arguments():
         "--user", "-u", required=True, help="The GitHub username to search for"
     )
     parser.add_argument(
-        "--query",
+        "--query-wordlists",
         "-q",
         nargs="+",
-        default=["deleted .env", "delete .env", "hide .env", ".env"],
-        type=str,
+        default=[
+            curr_dir / "wordlists" / "sensitive_filenames.txt",
+            curr_dir / "wordlists" / "sensitive_keywords.txt",
+        ],
+        type=List[Path],
         help="A list of commit messages to search for",
     )
 
@@ -53,11 +63,11 @@ def parse_arguments():
 
     username = args.user
     output_dir: str | None = args.output
-    queries: list[str] = args.query
+    query_wordlists: list[Path] = args.query_wordlists
     terms: list[str] = args.terms
     is_verbose: bool = args.verbose
 
-    return (username, output_dir, queries, terms, is_verbose)
+    return (username, output_dir, query_wordlists, terms, is_verbose)
 
 
 def query_commits(username: str, query: str, output_dir: str | None) -> list[str]:
@@ -67,7 +77,9 @@ def query_commits(username: str, query: str, output_dir: str | None) -> list[str
     response = requests.get(url)
 
     if response.status_code != requests.codes.ok:
-        verbose_print(f"Request failed with status code {response.status_code}")
+        console.print(
+            f"[!] Request failed with status code {response.status_code}", style="error"
+        )
         verbose_print(response.text)
 
         return []
@@ -115,8 +127,8 @@ def get_commit_diff(repository: str, commit_hash: str, output_dir: str | None):
                 verbose_print(f"[+] grabbed {url}")
 
         return response.text
-    except:
-        verbose_print(f"[!] couldn't reach {url}")
+    except Exception as e:
+        console.print(f"[!] couldn't reach {url}", style="error")
 
 
 def extract_commit_details(item):
@@ -135,20 +147,34 @@ def search_terms_in_commit(content: str, terms: list[str]):
 
 
 def main():
-    username, output_dir, queries, terms, verbose_mode = parse_arguments()
+    username, output_dir, query_wordlist_paths, terms, verbose_mode = parse_arguments()
 
     global is_verbose
     is_verbose = verbose_mode
 
-    query_results = list(
-        map(lambda query: query_commits(username, query, output_dir), queries)
+    # Load query wordlist
+    query_wordlist = []
+    for wordlist_path in query_wordlist_paths:
+        with open(wordlist_path, "r") as f:
+            query_wordlist.extend(f.read().splitlines())
+
+    console.print(
+        f"Loaded {len(query_wordlist)} query terms from {len(query_wordlist_paths)} wordlists.",
+        style="success",
     )
 
-    if terms is not None:
-        for query_result in query_results:
-            for commit in query_result:
-                for term_match in search_terms_in_commit(commit, terms):
-                    console.print(term_match, style="red bold")
+    query_results = list(
+        map(
+            lambda wordlist: query_commits(username, wordlist, output_dir),
+            query_wordlist,
+        )
+    )
+
+    # if terms is not None:
+    #     for query_result in query_results:
+    #         for commit in query_result:
+    #             for term_match in search_terms_in_commit(commit, terms):
+    #                 console.print(term_match, style="red bold")
 
 
 if __name__ == "__main__":
