@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import re
 from typing import List
+from dotenv import load_dotenv
+import os
 
 import requests
 from rich.console import Console, themes
@@ -18,6 +20,23 @@ console = Console(
         {"info": "blue", "success": "green", "warning": "yellow", "error": "red"}
     )
 )
+# Load environment variables from .env file
+load_dotenv()
+
+
+def fetch(url: str):
+    """
+    Fetches the content from the given URL.
+    Returns the content as a string if successful, or None if an error occurs.
+    """
+
+    # Create the headers dictionary with the Bearer token
+    access_token = os.getenv("ACCESS_TOKEN")
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        # "Content-Type": "application/json",  # Example of another common header
+    }
+    return requests.get(url, headers=headers)
 
 
 def verbose_print(message: str):
@@ -74,7 +93,7 @@ def query_commits(username: str, query: str, output_dir: str | None) -> list[str
     url = COMMIT_SEARCH_URL.format(username, query.replace(" ", "+"))
     verbose_print(f"searching: {url}")
 
-    response = requests.get(url)
+    response = fetch(url)
 
     if response.status_code != requests.codes.ok:
         console.print(
@@ -108,7 +127,7 @@ def get_commit_diff(repository: str, commit_hash: str, output_dir: str | None):
     url = DIFF_URL.format(repository, commit_hash)
 
     try:
-        response = requests.get(url)
+        response = fetch(url)
         response.raise_for_status()
 
         if output_dir is None:
@@ -147,6 +166,14 @@ def search_terms_in_commit(content: str, terms: list[str]):
 
 
 def main():
+    # Access environment variables
+    access_token = os.getenv("ACCESS_TOKEN")
+    if not access_token:
+        console.print(
+            "[!] ACCESS_TOKEN environment variable is not set.", style="error"
+        )
+        return -1
+
     username, output_dir, query_wordlist_paths, terms, verbose_mode = parse_arguments()
 
     global is_verbose
